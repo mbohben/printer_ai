@@ -3,14 +3,20 @@ import numpy as np
 import time
 import requests
 import json
-import os
 import subprocess
+import os
+from collections import deque
 
 CONFIG_PATH = "config.json"
 MOONRAKER = "http://localhost:7125"
 STREAM_URL = "http://localhost:1984/api/stream.mjpeg?src=esp32"
 
 DEBUG_PATH = "/tmp/ai_debug.jpg"
+
+motion_hist = deque(maxlen=50)
+edge_hist = deque(maxlen=50)
+
+fail_counter = 0
 
 def load_config():
     with open(CONFIG_PATH) as f:
@@ -25,7 +31,7 @@ def get_toolhead():
         return None, None
 
 def get_transform(cfg):
-    m = cfg["calibration"].get("transform_matrix", [])
+    m = cfg["calibration"]["transform_matrix"]
     if len(m) == 9:
         return np.array(m).reshape(3,3)
     return None
@@ -56,15 +62,13 @@ def dynamic_mask(frame, cfg):
     return cv2.bitwise_and(frame, frame, mask=mask)
 
 # FFmpeg stream
-ffmpeg_cmd = [
-    "ffmpeg", "-loglevel", "quiet",
+pipe = subprocess.Popen([
+    "ffmpeg","-loglevel","quiet",
     "-i", STREAM_URL,
-    "-vf", "scale=640:480",
-    "-f", "rawvideo",
-    "-pix_fmt", "bgr24", "-"
-]
-
-pipe = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, bufsize=10**8)
+    "-vf","scale=640:480",
+    "-f","rawvideo",
+    "-pix_fmt","bgr24","-"
+], stdout=subprocess.PIPE)
 
 prev = None
 
@@ -95,15 +99,31 @@ while True:
     _, thresh = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)
 
     motion = np.sum(thresh)/255
-
     edges = cv2.Canny(gray, 50, 150)
     edge = np.sum(edges)/255
 
+    # Adaptive baseline
+    motion_hist.append(motion)
+    edge_hist.append(edge)
+
+    motion_base = np.mean(motion_hist) if motion_hist else 0
+    edge_base = np.mean(edge_hist) if edge_hist else 0
+
+    score = 0
+    if motion > motion_base * 2:
+        score += 1
+    if edge > edge_base * 1.5:
+        score += 1
+
+    if score >= 2:
+        fail_counter += 1
+    else:
+        fail_counter = max(0, fail_counter - 1)
+
     status = "OK"
-    if motion > 100 and edge > 5000:
+    if fail_counter >= cfg["detection"]["confidence_required"]:
         status = "FAIL"
 
-    # DEBUG OVERLAY (low cost)
     overlay = frame_proc.copy()
     cv2.putText(overlay, f"M:{int(motion)} E:{int(edge)} {status}",
                 (10,20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0),1)
