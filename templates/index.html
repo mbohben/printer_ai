@@ -1,252 +1,106 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Printer AI | Control Center</title>
-    <style>
-        :root {
-            --bg: #121212;
-            --card: #1e1e1e;
-            --accent: #00e676;
-            --warn: #ff9100;
-            --danger: #ff5252;
-            --text: #ffffff;
-        }
+<script>
+    let points = [];
+    let isCalibrating = false;
+    const canvas = document.getElementById('cal-canvas');
+    const ctx = canvas.getContext('2d');
+    const status = document.getElementById('status-bar');
+    const debugImg = document.getElementById('debug-img');
 
-        body {
-            background-color: var(--bg);
-            color: var(--text);
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            margin: 0;
-            padding: 20px;
-        }
+    canvas.width = 640;
+    canvas.height = 480;
 
-        h2 { color: var(--accent); margin-bottom: 10px; }
+    function setMode(mode) {
+        isCalibrating = (mode === 'calibrate');
+        status.innerText = "Mode: " + mode.toUpperCase();
+        // Hide/Show canvas based on mode
+        canvas.style.pointerEvents = isCalibrating ? "auto" : "none";
+    }
 
-        .main-container {
-            width: 100%;
-            max-width: 900px;
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-            align-items: center;
-        }
+    function enableCalib() {
+        points = [];
+        setMode('calibrate');
+        draw();
+    }
 
-        /* Viewport Styling */
-        .viewport-wrapper {
-            position: relative;
-            background: #000;
-            border: 3px solid #333;
-            border-radius: 8px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-            line-height: 0;
-        }
-
-        #debug-img {
-            width: 640px;
-            height: 480px;
-            display: block;
-        }
-
-        #cal-canvas {
-            position: absolute;
-            top: 0;
-            left: 0;
-            cursor: crosshair;
-            width: 640px;
-            height: 480px;
-        }
-
-        /* Control Panels */
-        .panel-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 20px;
-            width: 100%;
-        }
-
-        .card {
-            background: var(--card);
-            padding: 20px;
-            border-radius: 12px;
-            border: 1px solid #333;
-        }
-
-        .btn-group {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            justify-content: center;
-        }
-
-        button {
-            padding: 10px 18px;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            font-weight: bold;
-            transition: opacity 0.2s;
-        }
-
-        button:hover { opacity: 0.8; }
-        button:active { transform: scale(0.98); }
-
-        .btn-ai { background: var(--accent); color: #000; }
-        .btn-cal { background: var(--warn); color: #000; }
-        .btn-home { background: var(--danger); color: white; }
-        .btn-move { background: #444; color: white; }
-
-        #status-bar {
-            background: #333;
-            padding: 5px 15px;
-            border-radius: 20px;
-            font-size: 0.9em;
-            margin-bottom: 10px;
-        }
-    </style>
-</head>
-<body>
-
-    <div class="main-container">
-        <h2>Printer AI Control</h2>
+    canvas.addEventListener('click', (e) => {
+        if (!isCalibrating) return;
+        const rect = canvas.getBoundingClientRect();
+        // Calculate scale in case the image is CSS-resized
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
         
-        <div id="status-bar">System Ready</div>
-
-        <div class="viewport-wrapper">
-            <img id="debug-img" src="/debug" alt="AI Feed">
-            <canvas id="cal-canvas"></canvas>
-        </div>
-
-        <div class="panel-grid">
-            <div class="card">
-                <h3>AI Mode</h3>
-                <div class="btn-group">
-                    <button class="btn-ai" onclick="setMode('monitor')">Start Monitor</button>
-                    <button class="btn-cal" onclick="enableCalib()">Calibrate Bed</button>
-                    <button style="background: #eee;" onclick="saveCalibration()">Save Points</button>
-                </div>
-                <p style="font-size: 0.8em; color: #888; margin-top: 10px;">
-                    Calibration: Click 4 corners of the bed in order (TL, TR, BR, BL).
-                </p>
-            </div>
-
-            <div class="card">
-                <h3>Printer Hardware</h3>
-                <div class="btn-group">
-                    <button class="btn-home" onclick="sendGcode('G28')">HOME ALL</button>
-                    <button class="btn-move" onclick="sendGcode('Z_TILT_ADJUST')">Z-TILT</button>
-                    <button class="btn-move" onclick="sendGcode('G1 X117.5 Y125 Z50 F3000')">CENTER HOVER</button>
-                </div>
-                <div class="btn-group" style="margin-top: 10px;">
-                    <button class="btn-move" onclick="sendGcode('G1 Z10')">Z=10</button>
-                    <button class="btn-move" onclick="sendGcode('G1 Z100')">Z=100</button>
-                    <button class="btn-move" onclick="sendGcode('M84')">OFF MOTORS</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        let points = [];
-        let isCalibrating = false;
-        const canvas = document.getElementById('cal-canvas');
-        const ctx = canvas.getContext('2d');
-        const status = document.getElementById('status-bar');
-
-        canvas.width = 640;
-        canvas.height = 480;
-
-        function setMode(mode) {
-            isCalibrating = (mode === 'calibrate');
-            status.innerText = "Mode: " + mode.toUpperCase();
-            fetch("/update", {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({"mode": mode})
-            });
+        const x = Math.round((e.clientX - rect.left) * scaleX);
+        const y = Math.round((e.clientY - rect.top) * scaleY);
+        
+        if (points.length < 4) {
+            points.push([x, y]);
+        } else {
+            points = [[x, y]]; 
         }
+        draw();
+    });
 
-        function enableCalib() {
-            points = [];
-            setMode('calibrate');
-            draw();
-        }
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (!isCalibrating) return;
 
-        canvas.addEventListener('click', (e) => {
-            if (!isCalibrating) return;
-            const rect = canvas.getBoundingClientRect();
-            const x = Math.round(e.clientX - rect.left);
-            const y = Math.round(e.clientY - rect.top);
-            
-            if (points.length < 4) {
-                points.push([x, y]);
-            } else {
-                points = [[x, y]]; // Reset if starting over
-            }
-            draw();
+        ctx.strokeStyle = "#00e676";
+        ctx.fillStyle = "#00e676";
+        ctx.lineWidth = 2;
+
+        points.forEach((p, i) => {
+            ctx.beginPath();
+            ctx.arc(p[0], p[1], 8, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = "white";
+            ctx.fillText(`P${i+1}`, p[0] + 12, p[1]);
+            ctx.fillStyle = "#00e676";
         });
 
-        function draw() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.strokeStyle = "#00ff99";
-            ctx.fillStyle = "#00ff99";
-            ctx.lineWidth = 2;
-
-            points.forEach((p, i) => {
-                ctx.beginPath();
-                ctx.arc(p[0], p[1], 6, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.fillText(`P${i+1}`, p[0] + 12, p[1]);
-            });
-
-            if (points.length > 1) {
-                ctx.beginPath();
-                ctx.moveTo(points[0][0], points[0][1]);
-                for(let i=1; i<points.length; i++) ctx.lineTo(points[i][0], points[i][1]);
-                if (points.length === 4) ctx.closePath();
-                ctx.stroke();
-            }
+        if (points.length > 1) {
+            ctx.beginPath();
+            ctx.moveTo(points[0][0], points[0][1]);
+            for(let i=1; i<points.length; i++) ctx.lineTo(points[i][0], points[i][1]);
+            if (points.length === 4) ctx.closePath();
+            ctx.stroke();
         }
+    }
 
-        function saveCalibration() {
-            if (points.length !== 4) {
-                alert("Select 4 points first!");
-                return;
-            }
-            fetch("/update", {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({
-                    "calibration": { "transform_matrix": points },
-                    "mode": "monitor"
-                })
-            }).then(() => {
-                status.innerText = "Calibration Saved Successfully!";
-                setTimeout(() => setMode('monitor'), 2000);
+    function saveCalibration() {
+        if (points.length !== 4) {
+            alert("Please click all 4 corners (TL, TR, BR, BL)");
+            return;
+        }
+        fetch("/update", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+                "calibration": { "transform_matrix": points },
+                "mode": "monitor"
+            })
+        }).then(() => {
+            status.innerText = "Matrix Calculated & Saved!";
+            setTimeout(() => {
+                setMode('monitor');
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
-            });
-        }
+            }, 2000);
+        });
+    }
 
-        function sendGcode(cmd) {
-            status.innerText = "Sending G-Code...";
-            fetch("/gcode", {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({"command": cmd})
-            }).then(res => {
-                if(res.ok) status.innerText = "Command Executed: " + cmd;
-                else status.innerText = "Error sending G-Code";
-            });
-        }
+    function sendGcode(cmd) {
+        status.innerText = "Executing G-Code...";
+        fetch("/gcode", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({"command": cmd})
+        }).then(res => {
+            status.innerText = res.ok ? "Done: " + cmd : "G-Code Failed";
+        });
+    }
 
-        // Live refresh logic
-        setInterval(() => {
-            document.getElementById("debug-img").src = "/debug?t=" + Date.now();
-        }, 400);
-    </script>
-</body>
-</html>
+    // Refresh the debug image
+    setInterval(() => {
+        debugImg.src = "/debug?t=" + Date.now();
+    }, 400);
+</script>
