@@ -1,86 +1,252 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Printer AI - Live View</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Printer AI | Control Center</title>
     <style>
+        :root {
+            --bg: #121212;
+            --card: #1e1e1e;
+            --accent: #00e676;
+            --warn: #ff9100;
+            --danger: #ff5252;
+            --text: #ffffff;
+        }
+
         body {
-            background: #1a1a1a;
-            color: #e0e0e0;
-            font-family: sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             display: flex;
             flex-direction: column;
-            align-items: center; /* Centers horizontally */
-            justify-content: center; /* Centers vertically */
-            min-height: 100vh;
+            align-items: center;
             margin: 0;
+            padding: 20px;
         }
 
-        .container {
-            text-align: center;
-            max-width: 90%;
+        h2 { color: var(--accent); margin-bottom: 10px; }
+
+        .main-container {
+            width: 100%;
+            max-width: 900px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            align-items: center;
         }
 
-        .camera-container {
+        /* Viewport Styling */
+        .viewport-wrapper {
             position: relative;
-            border: 2px solid #444;
-            border-radius: 8px;
-            overflow: hidden;
             background: #000;
-            margin-bottom: 20px;
+            border: 3px solid #333;
+            border-radius: 8px;
             box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            line-height: 0;
         }
 
-        #camera-preview {
+        #debug-img {
+            width: 640px;
+            height: 480px;
             display: block;
-            width: 640px; /* Base width */
-            transition: width 0.2s ease; /* Smooth scaling */
-            margin: 0 auto;
         }
 
-        .controls {
-            background: #2d2d2d;
-            padding: 15px 25px;
-            border-radius: 30px;
-            display: inline-block;
+        #cal-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            cursor: crosshair;
+            width: 640px;
+            height: 480px;
         }
 
-        input[type=range] {
+        /* Control Panels */
+        .panel-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            width: 100%;
+        }
+
+        .card {
+            background: var(--card);
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #333;
+        }
+
+        .btn-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+        }
+
+        button {
+            padding: 10px 18px;
+            border: none;
+            border-radius: 6px;
             cursor: pointer;
-            width: 200px;
+            font-weight: bold;
+            transition: opacity 0.2s;
         }
-        
-        h2 { margin-bottom: 10px; color: #00ff99; }
+
+        button:hover { opacity: 0.8; }
+        button:active { transform: scale(0.98); }
+
+        .btn-ai { background: var(--accent); color: #000; }
+        .btn-cal { background: var(--warn); color: #000; }
+        .btn-home { background: var(--danger); color: white; }
+        .btn-move { background: #444; color: white; }
+
+        #status-bar {
+            background: #333;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            margin-bottom: 10px;
+        }
     </style>
 </head>
 <body>
 
-    <div class="container">
-        <h2>Printer AI Monitor</h2>
+    <div class="main-container">
+        <h2>Printer AI Control</h2>
         
-        <div class="camera-container">
-            <img id="camera-preview" src="/debug" alt="Camera Feed">
+        <div id="status-bar">System Ready</div>
+
+        <div class="viewport-wrapper">
+            <img id="debug-img" src="/debug" alt="AI Feed">
+            <canvas id="cal-canvas"></canvas>
         </div>
 
-        <div class="controls">
-            <label>Preview Scale: </label>
-            <input type="range" id="scaler" min="400" max="1200" value="640" oninput="updateScale(this.value)">
-            <span id="val">640px</span>
+        <div class="panel-grid">
+            <div class="card">
+                <h3>AI Mode</h3>
+                <div class="btn-group">
+                    <button class="btn-ai" onclick="setMode('monitor')">Start Monitor</button>
+                    <button class="btn-cal" onclick="enableCalib()">Calibrate Bed</button>
+                    <button style="background: #eee;" onclick="saveCalibration()">Save Points</button>
+                </div>
+                <p style="font-size: 0.8em; color: #888; margin-top: 10px;">
+                    Calibration: Click 4 corners of the bed in order (TL, TR, BR, BL).
+                </p>
+            </div>
+
+            <div class="card">
+                <h3>Printer Hardware</h3>
+                <div class="btn-group">
+                    <button class="btn-home" onclick="sendGcode('G28')">HOME ALL</button>
+                    <button class="btn-move" onclick="sendGcode('Z_TILT_ADJUST')">Z-TILT</button>
+                    <button class="btn-move" onclick="sendGcode('G1 X117.5 Y125 Z50 F3000')">CENTER HOVER</button>
+                </div>
+                <div class="btn-group" style="margin-top: 10px;">
+                    <button class="btn-move" onclick="sendGcode('G1 Z10')">Z=10</button>
+                    <button class="btn-move" onclick="sendGcode('G1 Z100')">Z=100</button>
+                    <button class="btn-move" onclick="sendGcode('M84')">OFF MOTORS</button>
+                </div>
+            </div>
         </div>
     </div>
 
     <script>
-        // Smoothly upscale the image
-        function updateScale(val) {
-            document.getElementById('camera-preview').style.width = val + 'px';
-            document.getElementById('val').innerText = val + 'px';
+        let points = [];
+        let isCalibrating = false;
+        const canvas = document.getElementById('cal-canvas');
+        const ctx = canvas.getContext('2d');
+        const status = document.getElementById('status-bar');
+
+        canvas.width = 640;
+        canvas.height = 480;
+
+        function setMode(mode) {
+            isCalibrating = (mode === 'calibrate');
+            status.innerText = "Mode: " + mode.toUpperCase();
+            fetch("/update", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({"mode": mode})
+            });
         }
 
-        // Refresh the image every 200ms (5fps)
-        // Since /debug is a raw image, we append a timestamp to prevent browser caching
-        setInterval(function() {
-            var img = document.getElementById('camera-preview');
-            img.src = "/debug?t=" + new Date().getTime();
-        }, 200);
+        function enableCalib() {
+            points = [];
+            setMode('calibrate');
+            draw();
+        }
+
+        canvas.addEventListener('click', (e) => {
+            if (!isCalibrating) return;
+            const rect = canvas.getBoundingClientRect();
+            const x = Math.round(e.clientX - rect.left);
+            const y = Math.round(e.clientY - rect.top);
+            
+            if (points.length < 4) {
+                points.push([x, y]);
+            } else {
+                points = [[x, y]]; // Reset if starting over
+            }
+            draw();
+        });
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.strokeStyle = "#00ff99";
+            ctx.fillStyle = "#00ff99";
+            ctx.lineWidth = 2;
+
+            points.forEach((p, i) => {
+                ctx.beginPath();
+                ctx.arc(p[0], p[1], 6, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillText(`P${i+1}`, p[0] + 12, p[1]);
+            });
+
+            if (points.length > 1) {
+                ctx.beginPath();
+                ctx.moveTo(points[0][0], points[0][1]);
+                for(let i=1; i<points.length; i++) ctx.lineTo(points[i][0], points[i][1]);
+                if (points.length === 4) ctx.closePath();
+                ctx.stroke();
+            }
+        }
+
+        function saveCalibration() {
+            if (points.length !== 4) {
+                alert("Select 4 points first!");
+                return;
+            }
+            fetch("/update", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({
+                    "calibration": { "transform_matrix": points },
+                    "mode": "monitor"
+                })
+            }).then(() => {
+                status.innerText = "Calibration Saved Successfully!";
+                setTimeout(() => setMode('monitor'), 2000);
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            });
+        }
+
+        function sendGcode(cmd) {
+            status.innerText = "Sending G-Code...";
+            fetch("/gcode", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({"command": cmd})
+            }).then(res => {
+                if(res.ok) status.innerText = "Command Executed: " + cmd;
+                else status.innerText = "Error sending G-Code";
+            });
+        }
+
+        // Live refresh logic
+        setInterval(() => {
+            document.getElementById("debug-img").src = "/debug?t=" + Date.now();
+        }, 400);
     </script>
 </body>
 </html>
