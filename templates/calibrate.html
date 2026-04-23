@@ -1,36 +1,578 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Bed Calibration</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PRINTER_AI — Calibration</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700&display=swap');
+
+:root {
+  --bg:       #080a0d;
+  --bg2:      #0d1117;
+  --bg3:      #111820;
+  --border:   #1e2a38;
+  --amber:    #f0a500;
+  --amber-dim:#7a5200;
+  --cyan:     #00c8d4;
+  --red:      #e03c3c;
+  --green:    #27c480;
+  --text:     #c8d0dc;
+  --text-dim: #4a5568;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 13px;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+}
+.logo { font-family:'Orbitron',monospace; font-size:14px; letter-spacing:3px; color:var(--amber); }
+.back { color:var(--text-dim); text-decoration:none; font-size:12px; }
+.back:hover { color:var(--amber); }
+
+/* ── LAYOUT ── */
+.workspace {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  flex: 1;
+  gap: 0;
+  overflow: hidden;
+}
+
+/* ── VIDEO AREA ── */
+.video-wrap {
+  position: relative;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid var(--border);
+  cursor: crosshair;
+  min-height: 400px;
+}
+
+video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+canvas {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  pointer-events: none; /* let clicks pass to wrapper */
+}
+
+#click-target {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  cursor: crosshair;
+}
+
+/* ── SIDEBAR ── */
+.panel {
+  background: var(--bg2);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  overflow-y: auto;
+}
+
+.section {
+  border-bottom: 1px solid var(--border);
+  padding: 16px;
+}
+
+.section-title {
+  font-family: 'Orbitron', monospace;
+  font-size: 9px;
+  letter-spacing: 3px;
+  color: var(--amber-dim);
+  margin-bottom: 12px;
+}
+
+/* ── POINT LIST ── */
+.point-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  margin-bottom: 5px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  transition: border-color .2s;
+}
+.point-item.active  { border-color: var(--amber); }
+.point-item.placed  { border-color: var(--green); }
+
+.point-num {
+  font-family: 'Orbitron', monospace;
+  font-size: 14px;
+  width: 20px;
+  text-align: center;
+  color: var(--text-dim);
+}
+.point-item.active .point-num { color: var(--amber); }
+.point-item.placed .point-num { color: var(--green); }
+
+.point-info { flex: 1; }
+.point-label { font-size: 11px; color: var(--text); }
+.point-coords { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+.point-item.placed .point-coords { color: var(--cyan); }
+
+.point-clear {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 5px;
+  line-height: 1;
+  font-family: 'Share Tech Mono', monospace;
+}
+.point-clear:hover { color: var(--red); }
+
+/* ── BED DIAGRAM ── */
+.bed-diagram {
+  position: relative;
+  width: 180px;
+  height: 180px;
+  margin: 0 auto 12px;
+  border: 1px solid var(--border);
+  background: var(--bg3);
+}
+.bed-corner {
+  position: absolute;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 2px solid var(--border);
+  transform: translate(-50%, -50%);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9px;
+  font-family: 'Orbitron', monospace;
+  color: var(--text-dim);
+  transition: border-color .2s, background .2s, color .2s;
+}
+.bed-corner.active { border-color: var(--amber); color: var(--amber); }
+.bed-corner.placed { border-color: var(--green); background: rgba(39,196,128,.15); color: var(--green); }
+
+/* corners: origin=front-left, back-left, back-right, front-right */
+#dc0 { left:0%;   top:100%; }   /* front-left  = printer origin */
+#dc1 { left:0%;   top:0%;   }   /* back-left */
+#dc2 { left:100%; top:0%;   }   /* back-right */
+#dc3 { left:100%; top:100%; }   /* front-right */
+
+.bed-label {
+  position: absolute;
+  font-size: 9px;
+  color: var(--text-dim);
+  pointer-events: none;
+}
+.bed-label.origin { bottom: -18px; left: 0; }
+.bed-label.ymax   { top: -16px;   left: 0; }
+.bed-label.xmax   { bottom: -18px; right: 0; text-align: right; }
+
+/* ── BUTTONS ── */
+.btn {
+  width: 100%;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 9px 10px;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: center;
+  margin-bottom: 6px;
+  transition: border-color .15s, color .15s;
+}
+.btn:hover         { border-color: var(--amber); color: var(--amber); }
+.btn:disabled      { opacity: .35; cursor: default; pointer-events: none; }
+.btn.danger:hover  { border-color: var(--red); color: var(--red); }
+.btn.accent        { border-color: var(--amber-dim); color: var(--amber); }
+
+/* ── TOAST ── */
+#toast {
+  padding: 7px 12px;
+  font-size: 11px;
+  color: var(--text-dim);
+  border-top: 1px solid var(--border);
+  min-height: 34px;
+  transition: color .3s;
+  background: var(--bg2);
+}
+#toast.ok   { color: var(--green); }
+#toast.err  { color: var(--red);   }
+#toast.warn { color: var(--amber); }
+
+/* ── STATUS BAR ── */
+#status-bar {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(8,10,13,.8);
+  border: 1px solid var(--border);
+  padding: 5px 14px;
+  font-size: 11px;
+  color: var(--amber);
+  backdrop-filter: blur(4px);
+  pointer-events: none;
+  white-space: nowrap;
+}
+</style>
 </head>
 <body>
 
-<h2>Click 4 Bed Corners</h2>
+<header>
+  <span class="logo">CALIBRATION</span>
+  <a class="back" href="/">← DASHBOARD</a>
+</header>
 
-<img id="cam" src="/frame" width="640" style="cursor: crosshair;">
+<div class="workspace">
+
+  <!-- ── VIDEO ── -->
+  <div class="video-wrap" id="video-wrap">
+    <img id="stream" alt="stream" src="/api/stream/mjpeg">
+    <canvas id="overlay"></canvas>
+    <div id="click-target"></div>
+    <div id="status-bar">Click point 1 — printer origin (X=0, Y=0, front-left)</div>
+  </div>
+
+  <!-- ── SIDEBAR ── -->
+  <div class="panel">
+
+    <!-- Bed diagram -->
+    <div class="section">
+      <div class="section-title">Bed Reference</div>
+      <div class="bed-diagram">
+        <div class="bed-corner active" id="dc0">1</div>
+        <div class="bed-corner"        id="dc1">2</div>
+        <div class="bed-corner"        id="dc2">3</div>
+        <div class="bed-corner"        id="dc3">4</div>
+        <span class="bed-label origin">X=0 Y=0</span>
+        <span class="bed-label ymax">Y=max</span>
+        <span class="bed-label xmax">X=max</span>
+      </div>
+    </div>
+
+    <!-- Points -->
+    <div class="section">
+      <div class="section-title">Corner Points</div>
+
+      <div class="point-item active" id="pi0">
+        <div class="point-num">1</div>
+        <div class="point-info">
+          <div class="point-label">Origin — front-left</div>
+          <div class="point-coords" id="pc0">waiting for click…</div>
+        </div>
+        <button class="point-clear" onclick="clearPoint(0)" title="clear">×</button>
+      </div>
+
+      <div class="point-item" id="pi1">
+        <div class="point-num">2</div>
+        <div class="point-info">
+          <div class="point-label">Back-left (Y=max)</div>
+          <div class="point-coords" id="pc1">—</div>
+        </div>
+        <button class="point-clear" onclick="clearPoint(1)" title="clear">×</button>
+      </div>
+
+      <div class="point-item" id="pi2">
+        <div class="point-num">3</div>
+        <div class="point-info">
+          <div class="point-label">Back-right (X=max, Y=max)</div>
+          <div class="point-coords" id="pc2">—</div>
+        </div>
+        <button class="point-clear" onclick="clearPoint(2)" title="clear">×</button>
+      </div>
+
+      <div class="point-item" id="pi3">
+        <div class="point-num">4</div>
+        <div class="point-info">
+          <div class="point-label">Front-right (X=max)</div>
+          <div class="point-coords" id="pc3">—</div>
+        </div>
+        <button class="point-clear" onclick="clearPoint(3)" title="clear">×</button>
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="section">
+      <div class="section-title">Actions</div>
+      <button class="btn accent" id="btn-save" onclick="saveCalibration()" disabled>▶ SAVE CALIBRATION</button>
+      <button class="btn danger" onclick="resetAll()">↺ RESET ALL POINTS</button>
+    </div>
+
+    <div id="toast">stream starting…</div>
+
+  </div>
+</div>
 
 <script>
-const img = document.getElementById("cam");
+// ── POINT DEFINITIONS ─────────────────────────────────────────
+const POINT_HINTS = [
+  'Click point 1 — printer origin (X=0, Y=0, front-left)',
+  'Click point 2 — back-left (X=0, Y=max)',
+  'Click point 3 — back-right (X=max, Y=max)',
+  'Click point 4 — front-right (X=max, Y=0)',
+  'All 4 points placed. Save when ready.',
+];
 
-img.onclick = function(e) {
-    const rect = img.getBoundingClientRect();
-    const x = Math.round(e.clientX - rect.left);
-    const y = Math.round(e.clientY - rect.top);
+// ── STATE ─────────────────────────────────────────────────────
+let points   = [null, null, null, null];
+let nextSlot = 0;   // index of the next point to place
 
-    fetch("/click", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({x: x, y: y})
-    })
-    .then(r => r.json())
-    .then(d => console.log(d));
+// ── CANVAS SETUP ──────────────────────────────────────────────
+const canvas    = document.getElementById('overlay');
+const ctx       = canvas.getContext('2d');
+const videoEl   = document.getElementById('stream');  // now an <img>
+const wrap      = document.getElementById('video-wrap');
+const clickZone = document.getElementById('click-target');
+
+// Keep canvas pixel dimensions in sync with rendered video size
+const resizeObs = new ResizeObserver(() => {
+  canvas.width  = wrap.clientWidth;
+  canvas.height = wrap.clientHeight;
+  redraw();
+});
+resizeObs.observe(wrap);
+
+// ── IMG → CANVAS COORDINATE MAPPING ──────────────────────────
+// <img> uses naturalWidth/naturalHeight; falls back to wrap size if not loaded yet.
+function videoRect() {
+  const vw = videoEl.naturalWidth  || wrap.clientWidth;
+  const vh = videoEl.naturalHeight || wrap.clientHeight;
+  const cw = wrap.clientWidth;
+  const ch = wrap.clientHeight;
+  const scale = Math.min(cw / vw, ch / vh);
+  const rw = vw * scale;
+  const rh = vh * scale;
+  return {
+    left:   (cw - rw) / 2,
+    top:    (ch - rh) / 2,
+    width:  rw,
+    height: rh,
+    vw, vh,
+  };
+}
+
+// Convert a click on the overlay div to video pixel coordinates
+function toVideoCoords(clientX, clientY) {
+  const wrapRect = wrap.getBoundingClientRect();
+  const cx = clientX - wrapRect.left;
+  const cy = clientY - wrapRect.top;
+  const r  = videoRect();
+  // clamp to video area
+  const rx = Math.max(0, Math.min(cx - r.left, r.width));
+  const ry = Math.max(0, Math.min(cy - r.top,  r.height));
+  // scale to actual video pixels
+  return {
+    x: Math.round(rx / r.width  * r.vw),
+    y: Math.round(ry / r.height * r.vh),
+    // canvas draw position (in overlay space)
+    cx: r.left + rx,
+    cy: r.top  + ry,
+  };
+}
+
+// ── CLICK HANDLER ────────────────────────────────────────────
+clickZone.addEventListener('click', (e) => {
+  if (nextSlot >= 4) return;
+
+  const coords = toVideoCoords(e.clientX, e.clientY);
+  points[nextSlot] = { x: coords.x, y: coords.y, cx: coords.cx, cy: coords.cy };
+
+  updatePointUI(nextSlot, 'placed');
+  document.getElementById(`pc${nextSlot}`).textContent = `px:(${coords.x}, ${coords.y})`;
+
+  nextSlot++;
+  updateActiveUI();
+  redraw();
+
+  document.getElementById('status-bar').textContent = POINT_HINTS[nextSlot];
+  if (nextSlot === 4) {
+    document.getElementById('btn-save').disabled = false;
+  }
+});
+
+// ── CLEAR A SINGLE POINT ─────────────────────────────────────
+function clearPoint(i) {
+  // Shift points down: clear slot i, move later points back
+  for (let j = i; j < 3; j++) {
+    points[j] = points[j + 1];
+  }
+  points[3] = null;
+  nextSlot = Math.min(nextSlot, points.findIndex(p => p === null));
+  if (nextSlot === -1) nextSlot = 4;
+
+  // Rebuild UI coords
+  for (let j = 0; j < 4; j++) {
+    const p = points[j];
+    document.getElementById(`pc${j}`).textContent = p ? `px:(${p.x}, ${p.y})` : (j === nextSlot ? 'waiting for click…' : '—');
+    updatePointUI(j, p ? 'placed' : (j === nextSlot ? 'active' : ''));
+  }
+
+  document.getElementById('btn-save').disabled = nextSlot < 4;
+  document.getElementById('status-bar').textContent = POINT_HINTS[nextSlot];
+  redraw();
+}
+
+// ── RESET ────────────────────────────────────────────────────
+function resetAll() {
+  points   = [null, null, null, null];
+  nextSlot = 0;
+  for (let i = 0; i < 4; i++) {
+    document.getElementById(`pc${i}`).textContent = i === 0 ? 'waiting for click…' : '—';
+    updatePointUI(i, i === 0 ? 'active' : '');
+  }
+  document.getElementById('btn-save').disabled = true;
+  document.getElementById('status-bar').textContent = POINT_HINTS[0];
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+// ── DRAW ─────────────────────────────────────────────────────
+function redraw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  const placed = points.filter(Boolean);
+
+  // draw polygon outline when 3+ points
+  if (placed.length >= 3) {
+    ctx.beginPath();
+    ctx.moveTo(points[0].cx, points[0].cy);
+    for (let i = 1; i < placed.length; i++) ctx.lineTo(points[i].cx, points[i].cy);
+    if (placed.length === 4) ctx.closePath();
+    ctx.strokeStyle = 'rgba(240,165,0,0.4)';
+    ctx.lineWidth   = 1.5;
+    ctx.setLineDash([4, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // draw each point
+  points.forEach((p, i) => {
+    if (!p) return;
+
+    // outer ring
+    ctx.beginPath();
+    ctx.arc(p.cx, p.cy, 10, 0, Math.PI * 2);
+    ctx.strokeStyle = '#27c480';
+    ctx.lineWidth   = 1.5;
+    ctx.stroke();
+
+    // center dot
+    ctx.beginPath();
+    ctx.arc(p.cx, p.cy, 3, 0, Math.PI * 2);
+    ctx.fillStyle = '#27c480';
+    ctx.fill();
+
+    // label
+    ctx.font      = "bold 11px 'Share Tech Mono', monospace";
+    ctx.fillStyle = '#f0a500';
+    ctx.fillText(`P${i + 1}`, p.cx + 13, p.cy - 8);
+
+    // crosshair lines
+    ctx.strokeStyle = 'rgba(39,196,128,0.3)';
+    ctx.lineWidth   = 1;
+    ctx.beginPath();
+    ctx.moveTo(p.cx - 18, p.cy); ctx.lineTo(p.cx + 18, p.cy);
+    ctx.moveTo(p.cx, p.cy - 18); ctx.lineTo(p.cx, p.cy + 18);
+    ctx.stroke();
+  });
+
+  // "next click" indicator if awaiting a point
+  updateDiagramCorners();
+}
+
+// ── UI HELPERS ───────────────────────────────────────────────
+function updatePointUI(i, state) {
+  const el = document.getElementById(`pi${i}`);
+  el.className = 'point-item ' + state;
+}
+
+function updateActiveUI() {
+  for (let i = 0; i < 4; i++) {
+    if (!points[i]) {
+      updatePointUI(i, i === nextSlot ? 'active' : '');
+      if (i === nextSlot) {
+        document.getElementById(`pc${i}`).textContent = 'waiting for click…';
+      }
+    }
+  }
+}
+
+function updateDiagramCorners() {
+  for (let i = 0; i < 4; i++) {
+    const el = document.getElementById(`dc${i}`);
+    el.className = 'bed-corner ' + (points[i] ? 'placed' : (i === nextSlot ? 'active' : ''));
+  }
+}
+
+// ── TOAST ────────────────────────────────────────────────────
+let toastTimer;
+function toast(msg, type = '') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className   = type;
+  clearTimeout(toastTimer);
+  if (type) toastTimer = setTimeout(() => { el.textContent = ''; el.className = ''; }, 4000);
+}
+
+// ── SAVE ─────────────────────────────────────────────────────
+async function saveCalibration() {
+  if (points.some(p => !p)) { toast('Place all 4 points first', 'warn'); return; }
+
+  const payload = {
+    points: points.map(p => ({ x: p.x, y: p.y }))
+  };
+
+  try {
+    const r = await fetch('/api/calibrate', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(payload),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      toast('Calibration saved' + (d.monitor_updated ? ' & monitor updated' : ' (monitor offline)'), 'ok');
+    } else {
+      toast('Server error: ' + (d.error || 'unknown'), 'err');
+    }
+  } catch (e) {
+    toast('Network error: ' + e.message, 'err');
+  }
+}
+
+// ── MJPEG STREAM ─────────────────────────────────────────────
+videoEl.onload  = () => {
+  canvas.width  = wrap.clientWidth;
+  canvas.height = wrap.clientHeight;
+  toast('Stream live — click bed corners', 'ok');
 };
-
-// refresh image
-setInterval(() => {
-    img.src = "/frame?" + new Date().getTime();
-}, 1000);
+videoEl.onerror = () => {
+  toast('Stream lost — retrying…', 'err');
+  setTimeout(() => { videoEl.src = '/api/stream/mjpeg?t=' + Date.now(); }, 4000);
+};
 </script>
-
 </body>
 </html>
